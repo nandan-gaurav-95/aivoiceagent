@@ -151,7 +151,7 @@ POST http://localhost:8080/bulk-call
 Content-Type: application/json
 
 [
-  { "name": "Rahul Sharma", "phone": "+917843069930" },
+  { "name": "Rahul Sharma", "phone": "+919876543210" },
   { "name": "Priya Patel",  "phone": "+919876543210" }
 ]
 ```
@@ -168,7 +168,7 @@ file: guests.csv
 **CSV Format:**
 ```csv
 name,phone
-Rahul Sharma,+917843069930
+Rahul Sharma,+919876543210
 Priya Patel,+919876543210
 ```
 
@@ -233,4 +233,3 @@ MIT License — feel free to use and modify.
 **Gaurav Nandan**  
 Java Full Stack Developer  
 Spring Boot | React | Voice AI  
-📧 gaurav.nandan09@gmail.com

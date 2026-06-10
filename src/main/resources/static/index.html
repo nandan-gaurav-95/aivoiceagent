@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wedding Invitation Caller</title>
+    <style>
+        body { font-family: Arial; max-width: 700px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
+        .card { background: white; padding: 25px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { color: #8B0000; text-align: center; }
+        h2 { color: #555; font-size: 18px; }
+        button { padding: 12px 25px; margin: 8px; font-size: 15px; cursor: pointer; border: none; border-radius: 8px; }
+        .btn-green { background: #28a745; color: white; }
+        .btn-red { background: #dc3545; color: white; }
+        .btn-blue { background: #007bff; color: white; }
+        .btn-orange { background: #fd7e14; color: white; }
+        button:disabled { opacity: 0.5; }
+        #logs { background: #1a1a1a; color: #00ff00; padding: 15px; height: 250px; overflow-y: auto; border-radius: 8px; font-family: monospace; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        th { background: #8B0000; color: white; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        .status-ok { color: green; font-weight: bold; }
+        .status-fail { color: red; font-weight: bold; }
+        input[type="text"] { padding: 8px; width: 200px; border: 1px solid #ddd; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🎊 Wedding Invitation Caller</h1>
+
+    <!-- Voice Test Section -->
+    <div class="card">
+        <h2>🎤 Voice Agent Test (Browser)</h2>
+        <button class="btn-green" id="startBtn" onclick="startCall()">Start Talking</button>
+        <button class="btn-red" id="stopBtn" onclick="stopCall()" disabled>Stop</button>
+    </div>
+
+    <!-- Manual Single Call -->
+    <div class="card">
+        <h2>📞 Single Call</h2>
+        <input type="text" id="singlePhone" placeholder="+917843069930"/>
+        <input type="text" id="singleName" placeholder="Guest Name"/>
+        <button class="btn-blue" onclick="makeSingleCall()">Call Kara</button>
+    </div>
+
+    <!-- Bulk Call Section -->
+    <div class="card">
+        <h2>📋 Bulk Call — Guest List</h2>
+        
+        <!-- Manual add guests -->
+        <div id="guestTable">
+            <table id="guestList">
+                <thead><tr><th>Name</th><th>Phone</th><th>Action</th></tr></thead>
+                <tbody id="guestBody">
+                    <tr>
+                        <td><input type="text" placeholder="Rahul Sharma" id="name0"/></td>
+                        <td><input type="text" placeholder="+917843069930" id="phone0"/></td>
+                        <td><button onclick="removeRow(this)">❌</button></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <button class="btn-green" onclick="addRow()">+ Guest Add Kara</button>
+        <button class="btn-orange" onclick="startBulkCall()">🚀 Bulk Call Start</button>
+        
+        <br/><br/>
+        <b>Ya CSV upload kara:</b><br/>
+        <input type="file" id="csvFile" accept=".csv"/>
+        <button class="btn-blue" onclick="uploadCsv()">CSV Upload & Call</button>
+    </div>
+
+    <!-- Results -->
+    <div class="card" id="resultsCard" style="display:none">
+        <h2>📊 Call Results</h2>
+        <table>
+            <thead><tr><th>Name</th><th>Phone</th><th>Status</th></tr></thead>
+            <tbody id="resultsBody"></tbody>
+        </table>
+    </div>
+
+    <!-- Logs -->
+    <div class="card">
+        <h2>📟 Logs</h2>
+        <div id="logs"></div>
+    </div>
+
+<script>
+// =================== VOICE AGENT ===================
+let ws, audioContext, stream;
+const audioQueue = [];
+let isPlayingAudio = false;
+let rowCount = 1;
+
+function log(msg) {
+    const div = document.getElementById('logs');
+    div.innerHTML += new Date().toLocaleTimeString() + ' — ' + msg + '\n';
+    div.scrollTop = div.scrollHeight;
+}
+
+async function startCall() {
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+    try {
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        await audioContext.resume();
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        log('Microphone connected');
+
+        ws = new WebSocket('ws://localhost:8080/twilio-stream');
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = () => {
+            log('Connected to AI Agent!');
+            startAudioCapture();
+        };
+        ws.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                audioQueue.push(event.data);
+                if (!isPlayingAudio) playNext();
+            } else {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'ConversationText') {
+                        if (msg.role === 'user') log('You: ' + msg.content);
+                        if (msg.role === 'assistant') log('Agent: ' + msg.content);
+                    }
+                } catch(e) {}
+            }
+        };
+        ws.onclose = () => log('Disconnected');
+    } catch(e) { log('Error: ' + e.message); }
+}
+
+function startAudioCapture() {
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    processor.onaudioprocess = (e) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const data = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(data.length);
+            for (let i = 0; i < data.length; i++) {
+                pcm16[i] = Math.max(-1, Math.min(1, data[i])) * 32767;
+            }
+            ws.send(pcm16.buffer);
+        }
+    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+    log('Audio streaming started — bola!');
+}
+
+async function playNext() {
+    if (audioQueue.length === 0) { isPlayingAudio = false; return; }
+    isPlayingAudio = true;
+    const buf = audioQueue.shift();
+    try {
+        const pcm16 = new Int16Array(buf);
+        const f32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) f32[i] = pcm16[i] / 32768.0;
+        const ctx = new AudioContext({ sampleRate: 16000 });
+        const ab = ctx.createBuffer(1, f32.length, 16000);
+        ab.copyToChannel(f32, 0);
+        const src = ctx.createBufferSource();
+        src.buffer = ab;
+        src.connect(ctx.destination);
+        src.onended = () => { ctx.close(); playNext(); };
+        src.start(0);
+    } catch(e) { playNext(); }
+}
+
+function stopCall() {
+    if (ws) ws.close();
+    if (audioContext) audioContext.close();
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    audioQueue.length = 0;
+    isPlayingAudio = false;
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    log('Call ended');
+}
+
+// =================== BULK CALLING ===================
+function addRow() {
+    const tbody = document.getElementById('guestBody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" placeholder="Guest Name" id="name${rowCount}"/></td>
+        <td><input type="text" placeholder="+91XXXXXXXXXX" id="phone${rowCount}"/></td>
+        <td><button onclick="removeRow(this)">❌</button></td>`;
+    tbody.appendChild(tr);
+    rowCount++;
+}
+
+function removeRow(btn) {
+    btn.closest('tr').remove();
+}
+
+async function makeSingleCall() {
+    const phone = document.getElementById('singlePhone').value;
+    const name = document.getElementById('singleName').value;
+    if (!phone) { alert('Phone number taka!'); return; }
+
+    log('Calling ' + name + ' at ' + phone + '...');
+    const res = await fetch('/bulk-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ name, phone }])
+    });
+    const data = await res.json();
+    log('Result: ' + JSON.stringify(data[0]));
+}
+
+async function startBulkCall() {
+    const rows = document.querySelectorAll('#guestBody tr');
+    const guests = [];
+
+    rows.forEach((row, i) => {
+        const inputs = row.querySelectorAll('input');
+        const name = inputs[0].value.trim();
+        const phone = inputs[1].value.trim();
+        if (name && phone) guests.push({ name, phone });
+    });
+
+    if (guests.length === 0) { alert('Guests add kara!'); return; }
+    log('Starting bulk calls for ' + guests.length + ' guests...');
+
+    const res = await fetch('/bulk-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(guests)
+    });
+    const results = await res.json();
+    showResults(results);
+}
+
+async function uploadCsv() {
+    const file = document.getElementById('csvFile').files[0];
+    if (!file) { alert('CSV file select kara!'); return; }
+
+    log('Uploading CSV: ' + file.name);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/bulk-call/csv', {
+        method: 'POST',
+        body: formData
+    });
+    const results = await res.json();
+    showResults(results);
+}
+
+function showResults(results) {
+    document.getElementById('resultsCard').style.display = 'block';
+    const tbody = document.getElementById('resultsBody');
+    tbody.innerHTML = '';
+    results.forEach(r => {
+        tbody.innerHTML += `<tr>
+            <td>${r.name}</td>
+            <td>${r.phone}</td>
+            <td class="${r.status === 'INITIATED' ? 'status-ok' : 'status-fail'}">${r.status}</td>
+        </tr>`;
+    });
+    log('Bulk call complete! ' + results.length + ' calls initiated.');
+}
+</script>
+</body>
+</html>
